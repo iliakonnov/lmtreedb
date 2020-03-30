@@ -1,0 +1,28 @@
+[package]
+name = "lmtreedb"
+version = "0.1.0"
+authors = ["Ilia Konnov <iliakonnov@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "lmtreedb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lmtreedb_explorer"
+path = "src/main.rs"
+
+[dependencies]
+my_error = { path = "../my_error" }
+serde = { version = "1.0", features = ["derive"] }
+lmdb = "0.8"
+rmpv = "0.4"
+slog = "2.5"
+slog-scope = "4.3"
+
+tui = "0.6"
+termion = "1.5"
+unicode-width = "0.1"
+
+[dev-dependencies]
+tempfile = "3.1"
