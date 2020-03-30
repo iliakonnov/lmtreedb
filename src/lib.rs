@@ -250,8 +250,8 @@ impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
 impl Storage {
     /// Creates or loads database at the specified location.
     pub fn connect(path: &std::path::Path) -> Result<Self, Error> {
-        let env = lmdb::Environment::new().open(&path)?;
-        let db = env.create_db(None, Default::default())?;
+        let env = lmdb::Environment::new().open(&path).epos(pos!())?;
+        let db = env.create_db(None, Default::default()).epos(pos!())?;
         let mut res = Self { db, env };
         res.init_root()?;
         Ok(res)
@@ -303,6 +303,11 @@ impl Storage {
 
     /// Closes and consumes the database.
     pub fn close(self) -> Result<(), Error> {
+        // Do nothing, because self.env closes database on drop
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), Error> {
         self.env.sync(true).epos(pos!())?;
         Ok(())
     }
