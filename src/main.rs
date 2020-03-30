@@ -26,7 +26,14 @@ fn main() -> Result<(), Error> {
     let backend = TermionBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::connect(std::path::Path::new("database"))?;
+    let mut args: Vec<String> = std::env::args().collect();
+    let path = if args.len() > 1 {
+        args.remove(1)
+    } else {
+        "database".to_string()
+    };
+
+    let mut app = App::connect(std::path::Path::new(&path))?;
     loop {
         let k = stdin.next();
         if let Some(Ok(key)) = k {
