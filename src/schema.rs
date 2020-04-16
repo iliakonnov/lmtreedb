@@ -53,11 +53,11 @@ pub trait SchemaSerde: Sized {
 }
 
 impl<'de, T> SchemaSerde for T where T: SchemaSerdeMarker {
-    default fn load(val: rmpv::Value) -> Result<Self, Error> {
+    fn load(val: rmpv::Value) -> Result<Self, Error> {
         rmpv::ext::from_value(val).epos(pos!())
     }
 
-    default fn save(self) -> Result<rmpv::Value, Error> {
+    fn save(self) -> Result<rmpv::Value, Error> {
         rmpv::ext::to_value(self).epos(pos!())
     }
 }
@@ -73,6 +73,50 @@ impl<T> SchemaVersion for T where T: FirstVersionMarker {
     fn version() -> u64 {
         1
     }
+}
+
+/// This macro helps implementing schema.
+/// For example `def_schema!(MyData = 1; serde, last)` means:
+/// - `MyData` implements `SchemaVersion` with version = 1
+/// - Version is 1, so it also implements FirstVersionMarker
+/// - Also it is marked as `serde`, so `SchemaSerdeMarker` is added
+/// - And `last` means that #1 is the last version, so `LastVersionMarker` is implemented too
+#[macro_export]
+macro_rules! def_schema {
+    // Deny zero. This check can be bypassed btw
+    ($t:ty = 0; $($args:tt),* $(,)?) => {
+        compile_error!("Version '0' is not allowed");
+    };
+    // Implement FirstVersionMarker
+    ($t:ty = 1; $($args:tt),* $(,)?) => {
+        impl $crate::schema::FirstVersionMarker for $t {}
+        $(
+            $crate::def_schema!(@impl [$t] $args);
+        )*
+    };
+    // Otherwise implement SchemaVersion
+    ($t:ty = $ver:expr; $($args:tt),* $(,)?) => {
+        impl $crate::SchemaVersion for $t {
+            fn version() -> u64 {
+                $ver
+            }
+        }
+        $(
+            $crate::def_schema!(@impl [$t] $args);
+        )*
+    };
+    (@impl [$t:ty] last) => {
+        impl $crate::LastVersionMarker for $t {}
+    };
+    (@impl [$t:ty] serde) => {
+        impl $crate::SchemaSerdeMarker for $t {}
+    };
+    (@impl [$t:ty] $arg:tt) => {
+        compile_error!(concat!(
+            "Unknown arg while expanding def_schema:",
+            stringify!($arg)
+        ));
+    };
 }
 
 
