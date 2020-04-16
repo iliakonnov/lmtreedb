@@ -194,6 +194,27 @@ impl PathPart for DynPath {
     }
 }
 
+/// Path part that wraps provided type. Like DynPath, but much more strict
+pub struct Pathify<T: Display> {
+    parent: Path,
+    pub value: T
+}
+
+impl<T: Display> ExtendableVal<T> for Pathify<T> {
+    fn extend(parent: Path, value: T) -> Self {
+        Self {
+            parent,
+            value
+        }
+    }
+}
+
+impl<T: Display> PathPart for Pathify<T> {
+    fn path(self) -> Path {
+        self.parent + self.value
+    }
+}
+
 /// Macro to make strict pathes a lot easier to use
 ///
 /// # Create new part
@@ -221,43 +242,43 @@ macro_rules! path {
     // Combine path
     // Simple: path!([root] / T)
     ([$root:expr] / $t:ty) => {
-        $root.child::<$t>()
+        {
+            use $crate::path::NextChildDef;
+            $root.child::<$t>()
+        }
     };
     // child_val: path!([root] / T[val])
     ([$root:expr] / $t:ty[$val:expr]) => {
-        $root.child_val::<$t, _>($val)
+        {
+            use $crate::path::NextChildVal;
+            $root.child_val::<$t, _>($val)
+        }
     };
     // All together
     ([$root:expr] / $a:tt / $($t:tt)+) => {
-        path!([ path!([$root] / $a) ] / $($t)+)
+        $crate::path!([ $crate::path!([$root] / $a) ] / $($t)+)
     };
     ([$root:expr] / $a:tt[$val:tt] / $($t:tt)+) => {
-        path!([ path!([$root] / $a[$val]) ] / $($t)+)
+        $crate::path!([ $crate::path!([$root] / $a[$val]) ] / $($t)+)
     };
 
     // Create new
-    ($id:ident = $name:expr) => {
-        struct $id(Path);
-        path!(@impl $id $name);
+    ($vis:vis $id:ident = $name:expr) => {
+        $vis struct $id($crate::path::Path);
+        $crate::path!(@impl $id $name);
     };
-    (def $name:ident) => {
-        path!($name = stringify!($name) );
+    (def $vis:vis $name:ident) => {
+        $crate::path!($vis $name = stringify!($name) );
     };
-
-    (pub $id:ident $name:expr) => {
-        pub struct $id(Path);
-        path!(@impl $id $name);
-    };
-    (pub def $name:ident) => {path!(pub $name = stringify!($name))};
 
     (@impl $id:ident $name:expr) => {
-        impl ExtendableDef for $id {
-            fn extend(parent: Path) -> Self {
+        impl $crate::path::ExtendableDef for $id {
+            fn extend(parent: $crate::path::Path) -> Self {
                 Self(parent + $name)
             }
         }
-        impl PathPart for $id {
-            fn path(self) -> Path {
+        impl $crate::path::PathPart for $id {
+            fn path(self) -> $crate::path::Path {
                 self.0
             }
         }
@@ -266,27 +287,27 @@ macro_rules! path {
     // Link
     ($parent:tt -> $($child:tt),*) => {
         $(
-            path!(@link $parent $child);
+            $crate::path!(@link $parent $child);
         )*
     };
     ($(parent:tt),* -> $child:tt) => {
         $(
-            path!(@link $parent $child);
+            $crate::path!(@link $parent $child);
         )*
     };
     ($parent:tt -> $child:tt $(-> $($remaining:tt),+)+) => {
-        path!($parent -> $child);
-        path!($child $(-> $($remaining),+)+);
+        $crate::path!($parent -> $child);
+        $crate::path!($child $(-> $($remaining),+)+);
     };
 
     (@link $parent:ident $child:ident) => {
-        impl ChildTrait<$parent> for $child {}
+        impl $crate::path::ChildTrait<$parent> for $child {}
     };
     (@link * $child:ident) => {
-        impl<T> ChildTrait<T> for $child where T: PathPart {}
+        impl<T> $crate::path::ChildTrait<T> for $child where T: $crate::path::PathPart {}
     };
     (@link $parent:ident *) => {
-        impl<T> ChildTrait<$parent> for T where T: PathPart {}
+        impl<T> $crate::path::ChildTrait<$parent> for T where T: $crate::path::PathPart {}
     };
 }
 

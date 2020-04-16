@@ -84,7 +84,7 @@ impl<T> SchemaVersion for T where T: FirstVersionMarker {
 #[macro_export]
 macro_rules! def_schema {
     // Deny zero. This check can be bypassed btw
-    ($t:ty = 0; $($args:tt),* $(,)?) => {
+    ($t:ty = 0; $($args:tt)*) => {
         compile_error!("Version '0' is not allowed");
     };
     // Implement FirstVersionMarker
@@ -111,10 +111,10 @@ macro_rules! def_schema {
     (@impl [$t:ty] serde) => {
         impl $crate::SchemaSerdeMarker for $t {}
     };
-    (@impl [$t:ty] $arg:tt) => {
+    (@impl [$t:ty] $($arg:tt)*) => {
         compile_error!(concat!(
             "Unknown arg while expanding def_schema:",
-            stringify!($arg)
+            stringify!($($arg)*)
         ));
     };
 }
