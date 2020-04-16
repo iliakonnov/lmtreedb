@@ -16,7 +16,7 @@ path = "src/main.rs"
 my_error = { path = "../my_error" }
 serde = { version = "1.0", features = ["derive"] }
 lmdb = "0.8"
-rmpv = "0.4"
+rmpv = { version = "0.4", features = ["with-serde"] }
 slog = "2.5"
 slog-scope = "4.3"
 

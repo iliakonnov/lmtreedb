@@ -4,7 +4,7 @@ use std::iter::FromIterator;
 use crate::*;
 
 use super::load;
-use super::{NoSchema, Schema};
+use super::Schema;
 
 /// Stores only DataWrapper data and version
 ///
@@ -15,14 +15,10 @@ pub struct VersionWrapper<T: DataWrapper> {
     pub data: T,
 }
 
-impl<T: DataWrapper> Schema for VersionWrapper<T> {
-    type PrevVersion = NoSchema;
-    type NextVersion = NoSchema;
+impl<T: DataWrapper> FirstVersionMarker for VersionWrapper<T> {}
+impl<T: DataWrapper> LastVersionMarker for VersionWrapper<T> {}
 
-    fn version() -> u64 {
-        1
-    }
-
+impl<T: DataWrapper> SchemaSerde for VersionWrapper<T> {
     fn load(val: rmpv::Value) -> Result<Self, Error> {
         // Load internal array of two records
         let arr = val.as_array().err(pos!(val))?;
@@ -37,15 +33,6 @@ impl<T: DataWrapper> Schema for VersionWrapper<T> {
         // And deserialize saved version (`version`) to the required (`Self::T`)
         let data = load(version, data).epos(pos!())?;
         Ok(Self { data })
-    }
-
-    fn upgrade(_: Self::PrevVersion) -> Result<Self, Error> {
-        // It is required, because no one knows what version of VersionWrapper is stored in the database
-        Err(err!("VersionWrapper must have only one version"))
-    }
-
-    fn downgrade(_: Self::NextVersion) -> Result<Self, Error> {
-        Err(err!("VersionWrapper must have only one version"))
     }
 
     fn save(self) -> Result<rmpv::Value, Error> {
@@ -69,14 +56,10 @@ pub struct DataWrapperV1 {
 
 impl DataWrapper for DataWrapperV1 {}
 
-impl Schema for DataWrapperV1 {
-    type PrevVersion = NoSchema;
-    type NextVersion = NoSchema;
+impl FirstVersionMarker for DataWrapperV1 {}
+impl LastVersionMarker for DataWrapperV1 {}
 
-    fn version() -> u64 {
-        1
-    }
-
+impl SchemaSerde for DataWrapperV1 {
     fn load(val: rmpv::Value) -> Result<Self, Error> {
         let arr = val.as_array().err(pos!(val))?;
         if arr.len() != 3 {
@@ -96,14 +79,6 @@ impl Schema for DataWrapperV1 {
             version,
             data,
         })
-    }
-
-    fn upgrade(_: Self::PrevVersion) -> Result<Self, Error> {
-        Err(err!("Cannot upgrade, no previous version exists"))
-    }
-
-    fn downgrade(_: Self::NextVersion) -> Result<Self, Error> {
-        Err(err!("Cannot downgrade, no next version exists"))
     }
 
     fn save(self) -> Result<rmpv::Value, Error> {
