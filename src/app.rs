@@ -1,5 +1,6 @@
 use lmtreedb::path::{Path, PathPart, Root};
-use lmtreedb::{DataWrapperV1, Storage};
+use lmtreedb::wrappers::DataWrapperV1;
+use lmtreedb::Storage;
 use my_error::*;
 
 #[derive(Debug)]

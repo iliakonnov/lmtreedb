@@ -8,9 +8,9 @@ use std::cmp::Ordering;
 
 use lmdb::Transaction;
 
-pub use schema::*;
+use schema::*;
 use wrappers::VersionWrapper;
-pub use wrappers::{DataWrapper, DataWrapperV1};
+use wrappers::{DataWrapper, DataWrapperV1};
 
 use path::{Path, PathPart, Root};
 use my_error::*;
@@ -352,7 +352,7 @@ mod test {
         data: f64,
     }
 
-    def_schema!(Test2 = 2; last);
+    def_schema!(Test2 = [2];);
 
     impl SchemaSerde for Test2 {
         fn load(val: Value) -> Result<Self, Error> {

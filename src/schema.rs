@@ -65,74 +65,106 @@ impl<'de, T> SchemaSerde for T where T: SchemaSerdeMarker {
 /// Part of `Schema` trait. Default implementation provided for `FirstVersionMarker` types
 pub trait SchemaVersion {
     /// What version this type handles. Must be greater than zero. Zero is reserved for `NoSchema`
-    // TODO: make const
-    fn version() -> u64;
+    const VERSION: u64;
 }
 
 impl<T> SchemaVersion for T where T: FirstVersionMarker {
-    fn version() -> u64 {
-        1
-    }
+    const VERSION: u64 = 1;
 }
 
+/// Reexport static_Assertions for def_schema macro
+pub use static_assertions;
+
 /// This macro helps implementing schema.
-/// For example `def_schema!(MyData = 1; serde, last)` means:
+/// For example `def_schema!(MyData = 1; serde)` means:
 /// - `MyData` implements `SchemaVersion` with version = 1
 /// - Version is 1, so it also implements FirstVersionMarker
 /// - Also it is marked as `serde`, so `SchemaSerdeMarker` is added
-/// - And `last` means that #1 is the last version, so `LastVersionMarker` is implemented too
+///
+/// You can mark version as last by writing it in square brackets: `def_schema!(LastVer = [5])`
 #[macro_export]
 macro_rules! def_schema {
     // Deny zero. This check can be bypassed btw
     ($t:ty = 0; $($args:tt)*) => {
         compile_error!("Version '0' is not allowed");
     };
-    // Implement FirstVersionMarker
-    ($t:ty = 1; $($args:tt),* $(,)?) => {
+    // `= [1]`: Implement SingleVersionMarker
+    ($t:ty = [1]; $($args:tt)*) => {
+        impl $crate::schema::SingleVersionMarker for $t {}
+        $crate::def_schema!(@expand [$t] $($args)*);
+    };
+    // `= 1`: Implement FirstVersionMarker
+    ($t:ty = 1; $($args:tt)*) => {
         impl $crate::schema::FirstVersionMarker for $t {}
-        $(
-            $crate::def_schema!(@impl [$t] $args);
-        )*
+        $crate::def_schema!(@expand [$t] check_next, $($args)*);
     };
-    // Otherwise implement SchemaVersion
-    ($t:ty = $ver:expr; $($args:tt),* $(,)?) => {
-        impl $crate::SchemaVersion for $t {
-            fn version() -> u64 {
-                $ver
-            }
+    // `= [...];`: Implement LastVersionMarker
+    ($t:ty = [$ver:expr]; $($args:tt)*) => {
+        impl $crate::schema::LastVersionMarker for $t {}
+        impl $crate::schema::SchemaVersion for $t {
+            const VERSION: u64 = $ver;
         }
+        $crate::def_schema!(@expand [$t] check_prev, $($args)*);
+    };
+    // "Middle" version: just implement SchemaVersion and add more checks
+    ($t:ty = $ver:expr; $($args:tt)*) => {
+        impl $crate::schema::SchemaVersion for $t {
+            const VERSION: u64 = $ver;
+        }
+        $crate::def_schema!(@expand [$t] check_prev, check_next, $($args)*);
+    };
+    // Finish implementation
+    (@expand [$t:ty] $($args:tt),* $(,)?) => {
+        // Implement Schema for type
+        impl $crate::schema::Schema for $t {}
         $(
             $crate::def_schema!(@impl [$t] $args);
         )*
-    };
-    (@impl [$t:ty] last) => {
-        impl $crate::LastVersionMarker for $t {}
     };
     (@impl [$t:ty] serde) => {
-        impl $crate::SchemaSerdeMarker for $t {}
+        impl $crate::schema::SchemaSerdeMarker for $t {}
+    };
+    (@impl [$t:ty] check_next) => {
+        // Check that Self::VERSION == NextVersion::VERSION - 1
+        $crate::schema::static_assertions::const_assert_eq!(
+            <$t as $crate::schema::SchemaVersion>::VERSION,
+            <<$t as $crate::schema::SchemaDowngrade>::NextVersion
+                 as $crate::schema::SchemaVersion>::VERSION - 1
+        );
+    };
+    (@impl [$t:ty] check_prev) => {
+        // Check that Self::VERSION == PrevVersion::VERSION + 1
+        $crate::schema::static_assertions::const_assert_eq!(
+            <$t as $crate::schema::SchemaVersion>::VERSION,
+            <<$t as $crate::schema::SchemaUpgrade>::PrevVersion
+                 as $crate::schema::SchemaVersion>::VERSION + 1
+        );
     };
     (@impl [$t:ty] $($arg:tt)*) => {
         compile_error!(concat!(
-            "Unknown arg while expanding def_schema:",
+            "Unknown arg while expanding def_schema: ",
             stringify!($($arg)*)
         ));
     };
 }
 
 
-/// Used to specify how object can be serialized and deserialized to be stored in the database
+/// Specifies how object can be serialized and deserialized to be stored in the database
+///
+/// You should not implement this type manually, use def_schema! macro instead.
 pub trait Schema: Debug + SchemaUpgrade + SchemaDowngrade + SchemaSerde + SchemaVersion {
+    fn version() -> u64 {
+        Self::VERSION
+    }
 }
-
-impl<T> Schema for T where T: Debug + SchemaUpgrade + SchemaDowngrade + SchemaSerde + SchemaVersion {}
 
 /// Use this type for non-existing version in `Schema::PrevVersion` and `Schema::NextVersion`
 pub type NoSchema = !;
 
+impl Schema for NoSchema {}
+
 impl SchemaVersion for NoSchema {
-    fn version() -> u64 {
-        0
-    }
+    const VERSION: u64 = 0;
 }
 
 impl SchemaUpgrade for NoSchema {
@@ -171,7 +203,9 @@ impl<T: SingleVersionMarker> LastVersionMarker for T {}
 
 macro_rules! simple_type {
     { $($t:ty),* } => {
-        $(impl SingleVersionMarker for $t {})*
+        $(
+            def_schema!($t = [1]; serde);
+        )*
     };
 }
 
@@ -182,21 +216,5 @@ simple_type! {
     u64, i64,
     f32, f64,
     String, Vec<u8>,
-    bool
-}
-
-impl FirstVersionMarker for () {}
-impl LastVersionMarker for () {}
-impl SchemaSerde for () {
-    fn load(val: rmpv::Value) -> Result<Self, Error> {
-        if val.is_nil() {
-            Ok(())
-        } else {
-            Err(err!("Invalid rmpv value. Expected nil, found {:?}", val))
-        }
-    }
-
-    fn save(self) -> Result<rmpv::Value, Error> {
-        Ok(rmpv::Value::Nil)
-    }
+    bool, ()
 }

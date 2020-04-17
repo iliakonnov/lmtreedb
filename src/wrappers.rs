@@ -15,8 +15,9 @@ pub struct VersionWrapper<T: DataWrapper> {
     pub data: T,
 }
 
-impl<T: DataWrapper> FirstVersionMarker for VersionWrapper<T> {}
-impl<T: DataWrapper> LastVersionMarker for VersionWrapper<T> {}
+// We cannot use def_schema here because of generic arguments
+impl<T: DataWrapper> SingleVersionMarker for VersionWrapper<T> {}
+impl<T: DataWrapper> Schema for VersionWrapper<T> {}
 
 impl<T: DataWrapper> SchemaSerde for VersionWrapper<T> {
     fn load(val: rmpv::Value) -> Result<Self, Error> {
@@ -56,8 +57,7 @@ pub struct DataWrapperV1 {
 
 impl DataWrapper for DataWrapperV1 {}
 
-impl FirstVersionMarker for DataWrapperV1 {}
-impl LastVersionMarker for DataWrapperV1 {}
+def_schema!(DataWrapperV1 = [1];);
 
 impl SchemaSerde for DataWrapperV1 {
     fn load(val: rmpv::Value) -> Result<Self, Error> {
