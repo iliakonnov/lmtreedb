@@ -163,7 +163,7 @@ impl FileBrowser {
     }
 
     fn ls(&mut self) -> Result<(), Error> {
-        let info = self.storage.children(self.path.clone()).epos(pos!())?;
+        let info = self.storage.children(&self.path).epos(pos!())?;
         let info: DataWrapperV1 = info.err(pos!())?;
 
         self.file_info = format!(
@@ -216,7 +216,7 @@ impl FileBrowser {
             }
             CdPath::Current => self.path.clone(),
         };
-        self.storage.put(path, ()).epos(pos!())?;
+        self.storage.put(&path, ()).epos(pos!())?;
         self.ls().epos(pos!())?;
         Ok(())
     }
@@ -225,7 +225,7 @@ impl FileBrowser {
         let path = self.selected_path();
         match path.0 {
             CdPath::Relative(_) | CdPath::Absolute(_) => {
-                self.storage.del(path.1).epos(pos!())?;
+                self.storage.del(&path.1).epos(pos!())?;
             }
             CdPath::Current | CdPath::Up => {
                 return Err(err!("Cannot remove current or parent file"))
@@ -238,7 +238,7 @@ impl FileBrowser {
 
     fn read_dbg(&mut self) -> Result<(), Error> {
         let path = self.selected_path().1;
-        let info = self.storage.children(path).epos(pos!())?;
+        let info = self.storage.children(&path).epos(pos!())?;
         let info: DataWrapperV1 = info.err(pos!())?;
 
         self.info_title = self.path.to_string();

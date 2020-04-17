@@ -84,7 +84,7 @@ fn load<T: Schema>(version: u64, val: rmpv::Value) -> Result<T, Error> {
 trait RoTransactionExt: lmdb::Transaction {
     /// Loads DataWrapper for specified path if exists.
     /// DataWrapper contains all *info* about specified object (and serialized data)
-    fn info<T: DataWrapper>(&self, db: lmdb::Database, path: Path) -> Result<Option<T>, Error> {
+    fn info<T: DataWrapper>(&self, db: lmdb::Database, path: &Path) -> Result<Option<T>, Error> {
         let key = path.to_string();
 
         let res = lmdb::Transaction::get(self, db, &key);
@@ -100,7 +100,7 @@ trait RoTransactionExt: lmdb::Transaction {
     }
 
     /// Deserializes and returns object from database if exists.
-    fn get<T: Schema>(&self, db: lmdb::Database, path: Path) -> Result<Option<T>, Error> {
+    fn get<T: Schema>(&self, db: lmdb::Database, path: &Path) -> Result<Option<T>, Error> {
         let data: Option<DataWrapperV1> = RoTransactionExt::info(self, db, path).epos(pos!())?;
 
         let data = match data {
@@ -121,23 +121,23 @@ impl<T> RoTransactionExt for T where T: lmdb::Transaction {}
 trait RwTransactionExt {
     /// Same as put_unsafe, but also checks for path correctness
     /// and handles all stuff about children and parents
-    fn put<T: Schema>(&mut self, db: lmdb::Database, path: Path, data: T) -> Result<(), Error>;
+    fn put<T: Schema>(&mut self, db: lmdb::Database, path: &Path, data: T) -> Result<(), Error>;
 
     /// Just puts data into database. No version or parents, only given data.
     fn put_unsafe<T: Schema>(
         &mut self,
         db: lmdb::Database,
-        path: Path,
+        path: &Path,
         data: T,
     ) -> Result<(), Error>;
 
-    fn del(&mut self, db: lmdb::Database, path: Path) -> Result<(), Error>;
+    fn del(&mut self, db: lmdb::Database, path: &Path) -> Result<(), Error>;
 
     /// Helper method that wraps data in DataWrapper first.
     fn put_unsafe_wrapped<T: Schema>(
         &mut self,
         db: lmdb::Database,
-        path: Path,
+        path: &Path,
         data: T,
     ) -> Result<(), Error> {
         let data = DataWrapperV1 {
@@ -153,7 +153,7 @@ trait RwTransactionExt {
     fn put_unsafe_version<T: DataWrapper>(
         &mut self,
         db: lmdb::Database,
-        path: Path,
+        path: &Path,
         data: T,
     ) -> Result<(), Error> {
         let data = VersionWrapper { data };
@@ -163,22 +163,22 @@ trait RwTransactionExt {
 }
 
 impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
-    fn put<T: Schema>(&mut self, db: lmdb::Database, path: Path, data: T) -> Result<(), Error> {
+    fn put<T: Schema>(&mut self, db: lmdb::Database, path: &Path, data: T) -> Result<(), Error> {
         // First check is this path already used
         let existing: Option<DataWrapperV1> =
-            RoTransactionExt::info(self, db, path.clone()).epos(pos!())?;
+            RoTransactionExt::info(self, db, path).epos(pos!())?;
         match existing {
             None => {
                 // It is new key, so tell parent abount new child first.
                 let (parent_path, name) = path.pop();
                 let name = name.err(pos!())?;
                 let parent: Option<DataWrapperV1> =
-                    RoTransactionExt::info(self, db, parent_path.clone()).epos(pos!())?;
+                    RoTransactionExt::info(self, db, &parent_path).epos(pos!())?;
                 match parent {
                     None => return Err(err!("No parent '{}' found for '{}'", parent_path, path)),
                     Some(mut par) => {
                         par.children.insert(name);
-                        self.put_unsafe_version(db, parent_path, par).epos(pos!())?;
+                        self.put_unsafe_version(db, &parent_path, par).epos(pos!())?;
                     }
                 }
                 // And now we can safely put it
@@ -208,7 +208,7 @@ impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
     fn put_unsafe<T: Schema>(
         &mut self,
         db: lmdb::Database,
-        path: Path,
+        path: &Path,
         data: T,
     ) -> Result<(), Error> {
         let data = data.save()?;
@@ -219,9 +219,9 @@ impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
     }
 
     /// Removes specified node and removes it from parent.
-    fn del(&mut self, db: lmdb::Database, path: Path) -> Result<(), Error> {
+    fn del(&mut self, db: lmdb::Database, path: &Path) -> Result<(), Error> {
         // First check that there is no any children
-        let info: DataWrapperV1 = RoTransactionExt::info(self, db, path.clone())
+        let info: DataWrapperV1 = RoTransactionExt::info(self, db, path)
             .epos(pos!())?
             .err(pos!())?;
         if !info.children.is_empty() {
@@ -231,7 +231,7 @@ impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
         // Then remove this node from it's parent.
         let (parent_path, name) = path.pop();
         let name = name.err(pos!())?;
-        let mut parent: DataWrapperV1 = RoTransactionExt::info(self, db, parent_path.clone())
+        let mut parent: DataWrapperV1 = RoTransactionExt::info(self, db, &parent_path)
             .epos(pos!())?
             .err(pos!())?;
         let res = parent.children.remove(&name);
@@ -240,7 +240,7 @@ impl<'env> RwTransactionExt for lmdb::RwTransaction<'env> {
         }
 
         // Now put it.
-        self.put_unsafe_version(db, parent_path, parent)
+        self.put_unsafe_version(db, &parent_path, parent)
             .epos(pos!())?;
         self.del(db, &path.to_string(), None).epos(pos!())?;
         Ok(())
@@ -261,9 +261,9 @@ impl Storage {
     fn init_root(&mut self) -> Result<(), Error> {
         let mut rw = self.env.begin_rw_txn()?;
         let existing: Option<()> =
-            RoTransactionExt::get(&rw, self.db, Root::default().path()).epos(pos!())?;
+            RoTransactionExt::get(&rw, self.db, &Root::default().path()).epos(pos!())?;
         if existing.is_none() {
-            RwTransactionExt::put_unsafe_wrapped(&mut rw, self.db, Root::default().path(), ())
+            RwTransactionExt::put_unsafe_wrapped(&mut rw, self.db, &Root::default().path(), ())
                 .epos(pos!())?;
             rw.commit()?;
         }
@@ -271,7 +271,7 @@ impl Storage {
     }
 
     /// Returns information about specified node if exists.
-    pub fn children<T: DataWrapper>(&self, path: Path) -> Result<Option<T>, Error> {
+    pub fn children<T: DataWrapper>(&self, path: &Path) -> Result<Option<T>, Error> {
         let ro = self.env.begin_ro_txn().epos(pos!())?;
         let res = RoTransactionExt::info(&ro, self.db, path).epos(pos!())?;
         Ok(res)
@@ -279,14 +279,14 @@ impl Storage {
 
     /// Returns object at the specified path and deserializes it to the requires type.
     /// Returns error if deserialization failed
-    pub fn get<T: Schema>(&self, path: Path) -> Result<Option<T>, Error> {
+    pub fn get<T: Schema>(&self, path: &Path) -> Result<Option<T>, Error> {
         let ro = self.env.begin_ro_txn().epos(pos!())?;
         let res = RoTransactionExt::get(&ro, self.db, path).epos(pos!())?;
         Ok(res)
     }
 
     /// Removes the specified node. Should not contain any children before removing.
-    pub fn del(&self, path: Path) -> Result<(), Error> {
+    pub fn del(&self, path: &Path) -> Result<(), Error> {
         let mut rw = self.env.begin_rw_txn().epos(pos!())?;
         RwTransactionExt::del(&mut rw, self.db, path).epos(pos!())?;
         rw.commit().epos(pos!())?;
@@ -294,7 +294,7 @@ impl Storage {
     }
 
     /// Put the data at the specified path. Parent must exists before adding new entry.
-    pub fn put<T: Schema>(&self, path: Path, val: T) -> Result<(), Error> {
+    pub fn put<T: Schema>(&self, path: &Path, val: T) -> Result<(), Error> {
         let mut rw = self.env.begin_rw_txn().epos(pos!())?;
         RwTransactionExt::put(&mut rw, self.db, path, val).epos(pos!())?;
         rw.commit().epos(pos!())?;
@@ -413,9 +413,9 @@ mod test {
         let data = Test1 { data: 5 };
 
         let db = Storage::connect(path).unwrap();
-        db.put(get_path(), data).epos(pos!()).unwrap();
+        db.put(&get_path(), data).epos(pos!()).unwrap();
 
-        let data: Test1 = db.get(get_path()).epos(pos!()).unwrap().unwrap();
+        let data: Test1 = db.get(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(data.data, 5);
     }
 
@@ -426,9 +426,9 @@ mod test {
         let data = Test1 { data: 5 };
 
         let db = Storage::connect(path).unwrap();
-        db.put(get_path(), data).epos(pos!()).unwrap();
+        db.put(&get_path(), data).epos(pos!()).unwrap();
 
-        let data: Test2 = db.get(get_path()).epos(pos!()).unwrap().unwrap();
+        let data: Test2 = db.get(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(data.data, 5.0);
     }
 
@@ -439,9 +439,9 @@ mod test {
         let data = Test2 { data: 5.3 };
 
         let db = Storage::connect(path).epos(pos!()).unwrap();
-        db.put(get_path(), data).epos(pos!()).unwrap();
+        db.put(&get_path(), data).epos(pos!()).unwrap();
 
-        let data: Test1 = db.get(get_path()).epos(pos!()).unwrap().unwrap();
+        let data: Test1 = db.get(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(data.data, 5);
     }
 
@@ -451,12 +451,12 @@ mod test {
         let path = tmp.path();
 
         let db = Storage::connect(path).epos(pos!()).unwrap();
-        db.put(get_path(), Test1 { data: 2 }).epos(pos!()).unwrap();
-        db.put(get_path(), Test2 { data: 5.3 })
+        db.put(&get_path(), Test1 { data: 2 }).epos(pos!()).unwrap();
+        db.put(&get_path(), Test2 { data: 5.3 })
             .epos(pos!())
             .unwrap();
 
-        let data: Test2 = db.get(get_path()).epos(pos!()).unwrap().unwrap();
+        let data: Test2 = db.get(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(data.data, 5.3);
     }
 
@@ -466,12 +466,12 @@ mod test {
         let path = tmp.path();
 
         let db = Storage::connect(path).unwrap();
-        db.put(get_path(), Test2 { data: 5.3 })
+        db.put(&get_path(), Test2 { data: 5.3 })
             .epos(pos!())
             .unwrap();
-        db.put(get_path(), Test1 { data: 2 }).epos(pos!()).unwrap();
+        db.put(&get_path(), Test1 { data: 2 }).epos(pos!()).unwrap();
 
-        let data: Test2 = db.get(get_path()).epos(pos!()).unwrap().unwrap();
+        let data: Test2 = db.get(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(data.data, 2.0);
     }
 
@@ -481,14 +481,14 @@ mod test {
         let path = tmp.path();
         let db = Storage::connect(path).unwrap();
 
-        db.put(get_path(), Test2 { data: 5.3 })
+        db.put(&get_path(), Test2 { data: 5.3 })
             .epos(pos!())
             .unwrap();
-        let data: Option<Test2> = db.get(get_path()).epos(pos!()).unwrap();
+        let data: Option<Test2> = db.get(&get_path()).epos(pos!()).unwrap();
         assert!(data.is_some());
 
-        db.del(get_path()).epos(pos!()).unwrap();
-        let res: Option<Test1> = db.get(get_path()).epos(pos!()).unwrap();
+        db.del(&get_path()).epos(pos!()).unwrap();
+        let res: Option<Test1> = db.get(&get_path()).epos(pos!()).unwrap();
         assert!(res.is_none());
     }
 
@@ -498,12 +498,12 @@ mod test {
         let path = tmp.path();
         let db = Storage::connect(path).unwrap();
 
-        db.put(get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
-        db.put(get_path() + "hello", Test1 { data: 1 })
+        db.put(&get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
+        db.put(&(get_path() + "hello"), Test1 { data: 1 })
             .epos(pos!())
             .unwrap();
 
-        let info: DataWrapperV1 = db.children(get_path()).epos(pos!()).unwrap().unwrap();
+        let info: DataWrapperV1 = db.children(&get_path()).epos(pos!()).unwrap().unwrap();
         assert!(info.children.contains("hello"));
     }
 
@@ -513,13 +513,13 @@ mod test {
         let path = tmp.path();
         let db = Storage::connect(path).unwrap();
 
-        db.put(get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
-        db.put(get_path() + "hello", Test1 { data: 1 })
+        db.put(&get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
+        db.put(&(get_path() + "hello"), Test1 { data: 1 })
             .epos(pos!())
             .unwrap();
-        db.del(get_path() + "hello").epos(pos!()).unwrap();
+        db.del(&(get_path() + "hello")).epos(pos!()).unwrap();
 
-        let info: DataWrapperV1 = db.children(get_path()).epos(pos!()).unwrap().unwrap();
+        let info: DataWrapperV1 = db.children(&get_path()).epos(pos!()).unwrap().unwrap();
         assert!(info.children.is_empty());
     }
 
@@ -529,11 +529,11 @@ mod test {
         let path = tmp.path();
         let db = Storage::connect(path).unwrap();
 
-        db.put(get_path(), Test2 { data: 1.0 })
+        db.put(&get_path(), Test2 { data: 1.0 })
             .epos(pos!())
             .unwrap();
 
-        let info: DataWrapperV1 = db.children(get_path()).epos(pos!()).unwrap().unwrap();
+        let info: DataWrapperV1 = db.children(&get_path()).epos(pos!()).unwrap().unwrap();
         assert_eq!(info.version, Test2::version());
     }
 
@@ -544,13 +544,13 @@ mod test {
         let db = Storage::connect(path).unwrap();
 
         // Create parent
-        db.put(get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
+        db.put(&get_path(), Test1 { data: 1 }).epos(pos!()).unwrap();
         // Create child
-        db.put(get_path() + "a", Test1 { data: 1 })
+        db.put(&(get_path() + "a"), Test1 { data: 1 })
             .epos(pos!())
             .unwrap();
         // Remove parent
-        let res = db.del(get_path());
+        let res = db.del(&get_path());
         assert!(res.is_err())
     }
 
@@ -561,7 +561,7 @@ mod test {
         let db = Storage::connect(path).unwrap();
 
         // Create child
-        let res = db.put(get_path() + "a", Test1 { data: 1 });
+        let res = db.put(&(get_path() + "a"), Test1 { data: 1 });
         assert!(res.is_err())
     }
 
