@@ -43,11 +43,11 @@ fn load<T: Schema>(version: u64, val: rmpv::Value) -> Result<T, Error> {
             // Error if T::PrevVersion >= T::version(). It looks like invalid schema.
             // Also error if there is no place to downgrade (version == 0).
             // Second check is unreachable, because version <=, but just to be sure
-            if T::version() <= T::PrevVersion::version() || version == std::u64::MIN {
+            if T::PrevVersion::version() >= T::version() || version == 0 {
                 return Err(err!(
-                    "Invalid PrevVersion: {}; version: {}",
-                    T::PrevVersion::version(),
-                    version
+                    "Invalid PrevVersion: {} ({}); version: {} ({})",
+                    T::PrevVersion::version(), std::intrinsics::type_name::<T::PrevVersion>(),
+                    version, std::intrinsics::type_name::<T>()
                 ));
             }
 
@@ -318,37 +318,32 @@ mod test {
     use path::*;
 
     use super::*;
+    use rmpv::Value;
 
     #[derive(Debug)]
     struct Test1 {
         data: i64,
     }
 
-    impl Schema for Test1 {
-        type PrevVersion = NoSchema;
-        type NextVersion = Test2;
+    def_schema!(Test1 = 1;);
 
-        fn version() -> u64 {
-            1
-        }
-
+    impl SchemaSerde for Test1 {
         fn load(val: rmpv::Value) -> Result<Self, Error> {
             let data = val.as_i64().err_msg(pos!(), msg!("Unable to load"))?;
             Ok(Self { data })
         }
 
-        fn upgrade(_: !) -> Result<Self, Error> {
-            Err(err!("No prev version available"))
+        fn save(self) -> Result<rmpv::Value, Error> {
+            Ok(rmpv::Value::Integer(rmpv::Integer::from(self.data)))
         }
+    }
 
+    impl SchemaDowngrade for Test1 {
+        type NextVersion = Test2;
         fn downgrade(val: Self::NextVersion) -> Result<Self, Error> {
             Ok(Self {
                 data: val.data as i64,
             })
-        }
-
-        fn save(self) -> Result<rmpv::Value, Error> {
-            Ok(rmpv::Value::Integer(rmpv::Integer::from(self.data)))
         }
     }
 
@@ -357,31 +352,26 @@ mod test {
         data: f64,
     }
 
-    impl Schema for Test2 {
-        type PrevVersion = Test1;
-        type NextVersion = NoSchema;
+    def_schema!(Test2 = 2; last);
 
-        fn version() -> u64 {
-            2
-        }
-
-        fn load(val: rmpv::Value) -> Result<Self, Error> {
+    impl SchemaSerde for Test2 {
+        fn load(val: Value) -> Result<Self, Error> {
             let data = val.as_f64().err_msg(pos!(), msg!("Unable to load"))?;
             Ok(Self { data })
         }
+
+        fn save(self) -> Result<Value, Error> {
+            Ok(rmpv::Value::F64(self.data))
+        }
+    }
+
+    impl SchemaUpgrade for Test2 {
+        type PrevVersion = Test1;
 
         fn upgrade(val: Self::PrevVersion) -> Result<Self, Error> {
             Ok(Self {
                 data: val.data as f64,
             })
-        }
-
-        fn downgrade(_: !) -> Result<Self, Error> {
-            Err(err!("No next version available"))
-        }
-
-        fn save(self) -> Result<rmpv::Value, Error> {
-            Ok(rmpv::Value::F64(self.data))
         }
     }
 

@@ -241,25 +241,31 @@ impl<T: Display> PathPart for Pathify<T> {
 macro_rules! path {
     // Combine path
     // Simple: path!([root] / T)
-    ([$root:expr] / $t:ty) => {
+    ([$($root:tt)*] / $t:ty) => {
         {
             use $crate::path::NextChildDef;
-            $root.child::<$t>()
+            $crate::path!(@root $($root)*).child::<$t>()
         }
     };
     // child_val: path!([root] / T[val])
-    ([$root:expr] / $t:ty[$val:expr]) => {
+    ([$($root:tt)*] / $t:ty[$val:expr]) => {
         {
             use $crate::path::NextChildVal;
-            $root.child_val::<$t, _>($val)
+            $crate::path!(@root $($root)*).child_val::<$t, _>($val)
         }
     };
     // All together
-    ([$root:expr] / $a:tt / $($t:tt)+) => {
-        $crate::path!([ $crate::path!([$root] / $a) ] / $($t)+)
+    ([$($root:tt)*] / $a:tt / $($t:tt)+) => {
+        $crate::path!([ $crate::path!([$($root)*] / $a) ] / $($t)+)
     };
-    ([$root:expr] / $a:tt[$val:tt] / $($t:tt)+) => {
-        $crate::path!([ $crate::path!([$root] / $a[$val]) ] / $($t)+)
+    ([$($root:tt)*] / $a:tt[$val:tt] / $($t:tt)+) => {
+        $crate::path!([ $crate::path!([$($root)*] / $a[$val]) ] / $($t)+)
+    };
+    (@root) => {
+        $crate::path::Root::default()
+    };
+    (@root $root:expr) => {
+        $root
     };
 
     // Create new
@@ -364,5 +370,11 @@ mod test {
         let root = Root::default();
         let n = path!([root] / A / C / DynPath[123] / A / C / DynPath[345]);
         assert_eq!(n.into_string(), "@root/a/C/123/a/C/345");
+    }
+
+    #[test]
+    fn test_optional_root() {
+        let n = path!([] / A);
+        assert_eq!(n.into_string(), "@root/a");
     }
 }
